@@ -12,7 +12,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from . import db
+from . import auth, db
 
 logger = logging.getLogger(__name__)
 STATIC_DIR = Path(__file__).parent / "static"
@@ -39,6 +39,7 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(title="Spoonfuls", docs_url=None, redoc_url=None, lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+app.include_router(auth.router)
 
 
 @app.middleware("http")
