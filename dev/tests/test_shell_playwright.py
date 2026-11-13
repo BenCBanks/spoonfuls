@@ -7,7 +7,7 @@ import urllib.request
 import pytest
 
 pytest.importorskip("playwright.sync_api")
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import expect, sync_playwright
 
 
 @pytest.fixture(scope="module")
@@ -43,11 +43,10 @@ def test_shell_is_usable_at_phone_width(server):
         errors = []
         page.on("console", lambda message: errors.append(message.text) if message.type == "error" else None)
         page.goto(server)
-        assert page.locator(".tab-bar a").count() == 4
-        assert page.locator("h1").inner_text() == "Cookbook"
+        expect(page.locator(".tab-bar a")).to_have_count(4)
+        expect(page.locator("h1")).to_have_text("Cookbook")
         page.locator('[data-route="plan"]').click()
-        page.wait_for_function("window.location.hash === '#plan'")
-        assert page.locator("h1").inner_text() == "Plan"
-        assert page.url.endswith("#plan")
+        expect(page.locator("h1")).to_have_text("Plan")
+        expect(page).to_have_url(f"{server}/#plan")
         assert not errors
         browser.close()
