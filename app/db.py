@@ -54,6 +54,83 @@ MIGRATIONS: list[tuple[int, str, str]] = [
             GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO spoonfuls_app;
         """,
     ),
+    (
+        2,
+        "accounts-and-auth-functions",
+        """
+        ALTER TABLE users
+            ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT FALSE;
+        ALTER TABLE sessions
+            ADD COLUMN csrf_token_hash TEXT;
+
+        CREATE TABLE invites (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            code_hash TEXT NOT NULL UNIQUE,
+            created_by UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            expires_at TIMESTAMPTZ NOT NULL,
+            used_at TIMESTAMPTZ,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        );
+        ALTER TABLE invites ENABLE ROW LEVEL SECURITY;
+        ALTER TABLE invites FORCE ROW LEVEL SECURITY;
+
+        CREATE POLICY invites_admin_rows ON invites
+            USING (
+                created_by = NULLIF(current_setting('app.user_id', true), '')::uuid
+                AND EXISTS (
+                    SELECT 1 FROM users
+                    WHERE users.id = invites.created_by AND users.is_admin
+                )
+            )
+            WITH CHECK (
+                created_by = NULLIF(current_setting('app.user_id', true), '')::uuid
+                AND EXISTS (
+                    SELECT 1 FROM users
+                    WHERE users.id = invites.created_by AND users.is_admin
+                )
+            );
+
+        CREATE POLICY sessions_by_token ON sessions
+            FOR SELECT
+            USING (token_hash = current_setting('app.session_hash', true));
+
+        CREATE OR REPLACE FUNCTION lookup_user_for_login(lookup_email TEXT)
+        RETURNS TABLE(user_id UUID, password_hash TEXT)
+        LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public
+        AS $$
+            SELECT id, password_hash
+            FROM users
+            WHERE lower(email) = lower(trim(lookup_email))
+            LIMIT 1
+        $$;
+
+        CREATE OR REPLACE FUNCTION spoonfuls_has_users()
+        RETURNS BOOLEAN
+        LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public
+        AS $$ SELECT EXISTS (SELECT 1 FROM users) $$;
+
+        CREATE OR REPLACE FUNCTION spoonfuls_consume_invite(invite_hash TEXT)
+        RETURNS BOOLEAN
+        LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
+        AS $$
+        BEGIN
+            UPDATE invites
+            SET used_at = now()
+            WHERE code_hash = invite_hash
+              AND used_at IS NULL
+              AND expires_at > now();
+            RETURN FOUND;
+        END;
+        $$;
+
+        REVOKE ALL ON FUNCTION lookup_user_for_login(TEXT) FROM PUBLIC;
+        REVOKE ALL ON FUNCTION spoonfuls_has_users() FROM PUBLIC;
+        REVOKE ALL ON FUNCTION spoonfuls_consume_invite(TEXT) FROM PUBLIC;
+        GRANT EXECUTE ON FUNCTION lookup_user_for_login(TEXT) TO spoonfuls_app;
+        GRANT EXECUTE ON FUNCTION spoonfuls_has_users() TO spoonfuls_app;
+        GRANT EXECUTE ON FUNCTION spoonfuls_consume_invite(TEXT) TO spoonfuls_app;
+        """,
+    ),
 ]
 
 
@@ -81,31 +158,50 @@ def _ensure_app_role(conn: psycopg.Connection) -> None:
     """Create the least-privileged runtime role before granting table access."""
 
     password = os.environ.get("SPOONFULS_APP_PASSWORD")
-    if not password:
-        return
     with conn.cursor() as cur:
         cur.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (APP_ROLE,))
         if cur.fetchone() is None:
+            if password:
+                cur.execute(
+                    sql.SQL(
+                        "CREATE ROLE {} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE "
+                        "NOINHERIT PASSWORD {}"
+                    ).format(sql.Identifier(APP_ROLE), sql.Literal(password))
+                )
+            else:
+                # Local migrations still need the role named by default grants;
+                # the runtime startup guard refuses the owner connection later.
+                cur.execute(
+                    sql.SQL(
+                        "CREATE ROLE {} NOLOGIN NOSUPERUSER NOCREATEDB "
+                        "NOCREATEROLE NOINHERIT"
+                    ).format(sql.Identifier(APP_ROLE))
+                )
+        elif password:
             cur.execute(
-                sql.SQL(
-                    "CREATE ROLE {} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE "
-                    "NOINHERIT PASSWORD {}"
-                ).format(sql.Identifier(APP_ROLE), sql.Literal(password))
+                sql.SQL("ALTER ROLE {} LOGIN PASSWORD {}").format(
+                    sql.Identifier(APP_ROLE), sql.Literal(password)
+                )
             )
 
 
 def _grant_app_role(conn: psycopg.Connection) -> None:
     """Grant only runtime table access when the separate role is configured."""
 
-    if not os.environ.get("SPOONFULS_APP_PASSWORD"):
-        return
     with conn.cursor() as cur:
         cur.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (APP_ROLE,))
         if cur.fetchone() is not None:
             role = sql.Identifier(APP_ROLE)
             cur.execute(sql.SQL("GRANT USAGE ON SCHEMA public TO {}").format(role))
             cur.execute(
-                sql.SQL("GRANT SELECT, INSERT, UPDATE, DELETE ON users, sessions TO {}")
+                sql.SQL(
+                    "GRANT SELECT, INSERT, UPDATE, DELETE ON users, sessions, invites TO {}"
+                )
+                .format(role)
+            )
+            cur.execute(
+                sql.SQL("GRANT EXECUTE ON FUNCTION lookup_user_for_login(TEXT), "
+                        "spoonfuls_has_users(), spoonfuls_consume_invite(TEXT) TO {}")
                 .format(role)
             )
 

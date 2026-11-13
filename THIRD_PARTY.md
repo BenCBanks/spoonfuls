@@ -6,3 +6,4 @@ List each dependency here with its license when you add it.
 
 | Package | Used for | License |
 |---|---|---|
+| argon2-cffi | Argon2id password hashing | MIT |
