@@ -1,0 +1,47 @@
+name: Tests
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  quick:
+    if: github.event.pull_request.draft == true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt -r dev/tests/requirements.txt
+      - run: pytest -q dev/tests/test_app.py
+
+  full:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: spoonfuls
+          POSTGRES_USER: spoonfuls
+          POSTGRES_PASSWORD: ci-password
+        options: >-
+          --health-cmd "pg_isready -U spoonfuls -d spoonfuls"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+        ports:
+          - 5432:5432
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt -r dev/tests/requirements.txt
+      - run: python -m playwright install --with-deps chromium
+      - run: pytest -q dev/tests
+        env:
+          DATABASE_URL: postgresql://spoonfuls:ci-password@localhost:5432/spoonfuls

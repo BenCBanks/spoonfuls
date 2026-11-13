@@ -1,0 +1,1 @@
+"""Spoonfuls application package."""

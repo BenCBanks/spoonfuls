@@ -47,4 +47,11 @@ were assigned (see `docs/architecture.md` → Layout). Before opening a PR, reba
 renumber yours to come after it. Keep CSS changes in your area's section of `style.css`.
 
 ## Run and test
-Commands are added with the M0 skeleton. Until then there is nothing to run.
+Create the local app and PostgreSQL services with `docker compose up --build`. The app is
+available at `http://localhost:${SPOONFULS_PORT:-8900}`; the first database start generates a
+password in a private Docker volume. Stop it with `docker compose down` (add `-v` only when you
+intentionally want to remove the local database).
+
+For the targeted local checks, install `requirements.txt` and `dev/tests/requirements.txt`, then
+run `pytest -q dev/tests/test_app.py`. The full suite is `pytest -q dev/tests`; it includes the
+390 px Playwright shell check after installing Chromium with `python -m playwright install chromium`.
