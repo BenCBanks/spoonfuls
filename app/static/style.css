@@ -1,13 +1,3 @@
-:root {
-  color-scheme: light dark;
-  --background: #fbf8f3;
-  --surface: #ffffff;
-  --text: #1f1b16;
-  --secondary: #6b6258;
-  --accent: #b8432a;
-  --divider: #e9e2d8;
-}
-
 * { box-sizing: border-box; }
 
 html, body { min-height: 100%; }
@@ -22,7 +12,7 @@ body {
 
 main {
   min-height: 100dvh;
-  padding: max(24px, env(safe-area-inset-top)) 20px calc(88px + env(safe-area-inset-bottom));
+  padding: max(var(--space-5), env(safe-area-inset-top)) var(--space-5) calc(88px + env(safe-area-inset-bottom));
 }
 
 .empty-screen {
@@ -42,7 +32,7 @@ h1 {
 }
 
 p {
-  margin: 12px 0 0;
+  margin: var(--space-3) 0 0;
   color: var(--secondary);
   line-height: 1.5;
 }
@@ -54,8 +44,8 @@ p {
   left: 0;
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 4px;
-  padding: 8px 12px max(8px, env(safe-area-inset-bottom));
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3) max(var(--space-2), env(safe-area-inset-bottom));
   border-top: 1px solid var(--divider);
   background: color-mix(in srgb, var(--surface) 94%, transparent);
   backdrop-filter: blur(16px);
@@ -63,7 +53,7 @@ p {
 
 .tab-bar a {
   min-height: 44px;
-  padding: 12px 4px 10px;
+  padding: var(--space-3) var(--space-1) 10px;
   color: var(--secondary);
   font-size: 13px;
   text-align: center;
@@ -74,15 +64,4 @@ p {
   border-bottom: 2px solid var(--accent);
   color: var(--accent);
   font-weight: 700;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #151311;
-    --surface: #1e1b18;
-    --text: #f3eee7;
-    --secondary: #a89f94;
-    --accent: #e0775c;
-    --divider: #2c2824;
-  }
 }
