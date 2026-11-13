@@ -52,6 +52,10 @@ Hide the tab bar while the keyboard is open and during cooking view.
 
 ## Visual system (provisional)
 
+**Owner decision, 13 Nov 2026: no orange.** "I do not like the colors of the app so far, it needs to be not orange." No orange,
+terracotta, tomato, amber or paprika as the accent, in covers, placeholder food art or dark mode. The warm paper neutrals
+below are provisional too, until the owner picks a direction from #4.
+
 Single source of truth: `docs/design-tokens.json` → generated CSS. Edit the JSON, never a second palette.
 
 | Token | Light | Dark |
@@ -60,7 +64,7 @@ Single source of truth: `docs/design-tokens.json` → generated CSS. Edit the JS
 | Surface | `#FFFFFF` | `#1E1B18` |
 | Text | ink `#1F1B16` | `#F3EEE7` |
 | Secondary text | `#6B6258` | `#A89F94` |
-| Accent (primary action, active) | paprika `#B8432A` | `#E0775C` |
+| Accent (primary action, active) | **to be replaced:** owner rejected orange; chosen from #4 | — |
 | Divider | `#E9E2D8` | `#2C2824` |
 
 - **Type:** a warm serif for recipe and page titles (Fraunces or Source Serif 4, open licence, bundled); the native system sans for
