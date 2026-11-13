@@ -19,6 +19,8 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r requirements.txt -r dev/tests/requirements.txt
+      - run: python dev/generate_tokens.py --check
+      - run: python dev/check_tokens.py
       - run: pytest -q dev/tests/test_app.py
 
   full:
@@ -44,6 +46,8 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r requirements.txt -r dev/tests/requirements.txt
+      - run: python dev/generate_tokens.py --check
+      - run: python dev/check_tokens.py
       - run: python -m playwright install --with-deps chromium
       - run: pytest -q dev/tests
         env:

@@ -22,6 +22,7 @@ def test_shell_and_security_headers(monkeypatch):
     with TestClient(app) as client:
         response = client.get("/")
         static_response = client.get("/static/app.js")
+        tokens_response = client.get("/static/tokens.css")
 
     assert response.status_code == 200
     assert '<main id="app"' in response.text
@@ -29,11 +30,13 @@ def test_shell_and_security_headers(monkeypatch):
     style_hash = sha256((STATIC_DIR / "style.css").read_bytes()).hexdigest()
     assert f"/static/app.js?v={script_hash}" in response.text
     assert f"/static/style.css?v={style_hash}" in response.text
+    assert 'href="/static/tokens.css"' in response.text
     assert "script-src 'self'" in response.headers["content-security-policy"]
     assert response.headers["x-content-type-options"] == "nosniff"
     assert response.headers["x-frame-options"] == "DENY"
     assert response.headers["referrer-policy"] == "strict-origin-when-cross-origin"
     assert static_response.headers["cache-control"].endswith("immutable")
+    assert tokens_response.headers["cache-control"].endswith("immutable")
 
 
 def test_first_migration_has_private_users_and_sessions():

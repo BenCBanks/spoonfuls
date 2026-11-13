@@ -1,0 +1,40 @@
+{
+  "colors": {
+    "light": {
+      "background": "#F4F6FB",
+      "surface": "#FFFFFF",
+      "surface-soft": "#E5E9F4",
+      "text": "#171B2A",
+      "secondary": "#5C6374",
+      "accent": "#35458F",
+      "text-on-accent": "#FFFFFF",
+      "accent-soft": "#DFE4F8",
+      "divider": "#D9DEEB"
+    },
+    "dark": {
+      "background": "#111521",
+      "surface": "#1B2030",
+      "surface-soft": "#252C42",
+      "text": "#EEF1FB",
+      "secondary": "#AAB1C5",
+      "accent": "#9EAFFF",
+      "text-on-accent": "#111521",
+      "accent-soft": "#293665",
+      "divider": "#323B57"
+    }
+  },
+  "spacing": {
+    "1": "4px",
+    "2": "8px",
+    "3": "12px",
+    "4": "16px",
+    "5": "24px",
+    "6": "32px",
+    "7": "48px"
+  },
+  "radii": {
+    "control": "12px",
+    "card": "16px"
+  },
+  "contrast-minimum": 4.5
+}
