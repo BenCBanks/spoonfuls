@@ -1,0 +1,9 @@
+.git
+.github
+__pycache__
+.pytest_cache
+dev/tests
+data
+backups
+uploads
+HOUSE.md
