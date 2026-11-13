@@ -113,37 +113,6 @@ def _validate_url(url: str) -> tuple[_ResolvedAddress, ...]:
         raise
 
 
-def _resolve_unchecked(url: str) -> tuple[_ResolvedAddress, ...]:
-    """Resolve a test-patched URL without applying production validation."""
-    parts = urlsplit(url)
-    if not parts.hostname:
-        raise FetchError("invalid_url", "The recipe URL is not valid.", url=url)
-    try:
-        infos = socket.getaddrinfo(parts.hostname, parts.port or (443 if parts.scheme == "https" else 80), type=socket.SOCK_STREAM)
-    except (OSError, socket.gaierror) as exc:
-        raise FetchError("blocked_address", "The recipe host could not be resolved safely.", url=url) from exc
-    addresses = tuple(_ResolvedAddress(family, tuple(sockaddr)) for family, _socktype, _proto, _canonname, sockaddr in infos)
-    if not addresses:
-        raise FetchError("blocked_address", "The recipe host did not resolve to an address.", url=url)
-    return addresses
-
-
-class _PinnedHTTPConnection(http.client.HTTPConnection):
-    def __init__(self, host: str, port: int, address: _ResolvedAddress, timeout: float):
-        super().__init__(host, port, timeout=timeout)
-        self._address = address
-
-    def connect(self) -> None:
-        sock = socket.socket(self._address.family, socket.SOCK_STREAM)
-        try:
-            sock.settimeout(self.timeout if self.timeout is not None else DEFAULT_TIMEOUT)
-            sock.connect(self._address.sockaddr)
-        except BaseException:
-            sock.close()
-            raise
-        self.sock = sock
-
-
 class _PinnedHTTPSConnection(http.client.HTTPSConnection):
     def __init__(self, host: str, port: int, address: _ResolvedAddress, timeout: float):
         super().__init__(host, port, timeout=timeout, context=ssl.create_default_context())
@@ -172,12 +141,9 @@ def _remaining(deadline: float, url: str) -> float:
 def _connection(url: str, address: _ResolvedAddress, timeout: float) -> http.client.HTTPConnection:
     parts = urlsplit(url)
     host = parts.hostname
-    if not host:
-        raise FetchError("invalid_url", "The recipe URL is not valid.", url=url)
-    port = parts.port or (443 if parts.scheme.lower() == "https" else 80)
-    if parts.scheme.lower() == "https":
-        return _PinnedHTTPSConnection(host, port, address, timeout)
-    return _PinnedHTTPConnection(host, port, address, timeout)
+    if parts.scheme.lower() != "https" or not host:
+        raise FetchError("invalid_url", "Recipe imports require a public HTTPS URL.", url=url)
+    return _PinnedHTTPSConnection(host, 443, address, timeout)
 
 
 def _set_response_timeout(response: HTTPResponse, timeout: float) -> None:
@@ -303,8 +269,10 @@ def fetch_html(
     deadline = time.monotonic() + timeout
     current = url
     for redirects in range(max_redirects + 1):
-        validated = _validate_url(current)
-        addresses = validated if validated is not None else _resolve_unchecked(current)
+        parts = urlsplit(current)
+        if parts.scheme.lower() != "https":
+            raise FetchError("invalid_url", "Recipe imports require a public HTTPS URL.", url=current)
+        addresses = _validate_url(current)
         body, content_type, location, charset = _request(current, addresses, deadline, max_bytes)
         if location is not None:
             if redirects >= max_redirects:

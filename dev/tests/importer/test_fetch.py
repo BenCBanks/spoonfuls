@@ -1,3 +1,6 @@
+import socket
+import ssl
+import subprocess
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -38,6 +41,10 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path == "/redirect":
             self.send_response(302)
             self.send_header("Location", "/ok")
+            self.end_headers()
+        elif self.path == "/redirect-http":
+            self.send_response(302)
+            self.send_header("Location", "http://recipe.example.test/ok")
             self.end_headers()
         elif self.path == "/redirect1":
             self.send_response(302)
@@ -89,22 +96,57 @@ class Handler(BaseHTTPRequestHandler):
         return
 
 
+def _url(server: tuple[str, fetch_module._ResolvedAddress], path: str) -> str:
+    return server[0] + path
+
+
 @pytest.fixture
-def local_server(monkeypatch):
+def local_server(monkeypatch, tmp_path):
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     Handler.seen = []
+    cert = tmp_path / "cert.pem"
+    key = tmp_path / "key.pem"
+    subprocess.run(
+        [
+            "openssl",
+            "req",
+            "-x509",
+            "-newkey",
+            "rsa:2048",
+            "-nodes",
+            "-keyout",
+            str(key),
+            "-out",
+            str(cert),
+            "-days",
+            "1",
+            "-subj",
+            "/CN=recipe.example.test",
+            "-addext",
+            "subjectAltName=DNS:recipe.example.test",
+        ],
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    server_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    server_context.load_cert_chain(certfile=cert, keyfile=key)
+    server.socket = server_context.wrap_socket(server.socket, server_side=True)
+    address = fetch_module._ResolvedAddress(fetch_module.socket.AF_INET, ("127.0.0.1", server.server_port))
+    # The tests use a local certificate and a fictional hostname. Production
+    # still creates a normal verifying context and pins the resolver result.
+    monkeypatch.setattr(fetch_module, "_public_host", lambda _host, _port: (address,))
+    monkeypatch.setattr(fetch_module.ssl, "create_default_context", lambda: ssl._create_unverified_context())
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    # Local HTTP is intentionally used only by this test server. Production
-    # validation still rejects every non-HTTPS URL before opening a socket.
-    monkeypatch.setattr(fetch_module, "_validate_url", lambda _url: None)
-    yield f"http://127.0.0.1:{server.server_port}"
+    yield "https://recipe.example.test", address
     server.shutdown()
     thread.join(timeout=1)
+    server.server_close()
 
 
 def test_local_fetch_follows_one_redirect_and_sends_no_cookie(local_server):
-    result = fetch_html(local_server + "/redirect")
+    result = fetch_html(_url(local_server, "/redirect"))
     assert result.body == "<html><body>recipe</body></html>"
     assert result.redirects == 1
     assert all("Cookie" not in headers for _, headers in Handler.seen)
@@ -112,37 +154,43 @@ def test_local_fetch_follows_one_redirect_and_sends_no_cookie(local_server):
 
 def test_local_fetch_rejects_non_html_and_too_many_redirects(local_server):
     with pytest.raises(FetchError) as non_html:
-        fetch_html(local_server + "/json")
+        fetch_html(_url(local_server, "/json"))
     assert non_html.value.code == "not_html"
     with pytest.raises(FetchError) as redirects:
-        fetch_html(local_server + "/redirect1")
+        fetch_html(_url(local_server, "/redirect1"))
     assert redirects.value.code == "http_error"
     with pytest.raises(FetchError) as large:
-        fetch_html(local_server + "/large")
+        fetch_html(_url(local_server, "/large"))
     assert large.value.code == "too_large"
 
 
 def test_local_fetch_maps_http_and_timeout_errors(local_server):
     with pytest.raises(FetchError) as missing:
-        fetch_html(local_server + "/missing")
+        fetch_html(_url(local_server, "/missing"))
     assert missing.value.code == "http_error"
     with pytest.raises(FetchError) as timed_out:
-        fetch_html(local_server + "/slow", timeout=0.01)
+        fetch_html(_url(local_server, "/slow"), timeout=0.01)
     assert timed_out.value.code == "timeout"
 
 
 def test_total_deadline_stops_slow_drip(local_server):
     started = time.monotonic()
     with pytest.raises(FetchError) as timed_out:
-        fetch_html(local_server + "/drip", timeout=0.1)
+        fetch_html(_url(local_server, "/drip"), timeout=0.1)
     assert timed_out.value.code == "timeout"
     assert time.monotonic() - started < 0.5
 
 
 def test_location_header_on_success_is_not_a_redirect(local_server):
-    result = fetch_html(local_server + "/location200")
+    result = fetch_html(_url(local_server, "/location200"))
     assert result.redirects == 0
     assert "location header is metadata" in result.body
+
+
+def test_redirect_to_http_is_rejected(local_server):
+    with pytest.raises(FetchError) as rejected:
+        fetch_html(_url(local_server, "/redirect-http"))
+    assert rejected.value.code == "invalid_url"
 
 
 def test_content_type_and_meta_charset_decode_latin1_fixture(local_server, monkeypatch):
@@ -161,24 +209,31 @@ def test_content_type_and_meta_charset_decode_latin1_fixture(local_server, monke
         original(self)
 
     monkeypatch.setattr(Handler, "do_GET", serve_latin1)
-    meta_result = fetch_html(local_server + "/latin1")
-    header_result = fetch_html(local_server + "/latin1-header")
+    meta_result = fetch_html(_url(local_server, "/latin1"))
+    header_result = fetch_html(_url(local_server, "/latin1-header"))
     assert "Crème brûlée" in meta_result.body
     assert "Crème brûlée" in header_result.body
 
 
 def test_validated_address_is_used_without_a_second_dns_lookup(local_server, monkeypatch):
-    parts = fetch_module._ResolvedAddress(fetch_module.socket.AF_INET, ("127.0.0.1", int(local_server.rsplit(":", 1)[1])))
-    monkeypatch.setattr(fetch_module, "_validate_url", lambda _url: (parts,))
+    address = local_server[1]
+    calls: list[tuple[str, int | None]] = []
+
+    def resolver(host: str, port: int | None):
+        calls.append((host, port))
+        return (address,)
+
+    monkeypatch.setattr(fetch_module, "_public_host", resolver)
 
     def rebinding_resolution(*_args, **_kwargs):
         # A second lookup would return a private address. The pinned request
         # must never call the resolver again after validation.
-        return [(fetch_module.socket.AF_INET, fetch_module.socket.SOCK_STREAM, 0, "", ("127.0.0.1", parts.sockaddr[1]))]
+        return [(fetch_module.socket.AF_INET, fetch_module.socket.SOCK_STREAM, 0, "", ("127.0.0.1", address.sockaddr[1]))]
 
     monkeypatch.setattr(fetch_module.socket, "getaddrinfo", rebinding_resolution)
-    result = fetch_html("http://recipe.example.test:%s/ok" % parts.sockaddr[1])
+    result = fetch_html(_url(local_server, "/ok"))
     assert result.body == "<html><body>recipe</body></html>"
+    assert calls == [("recipe.example.test", None)]
 
 
 def test_public_urls_allow_only_default_https_port():
