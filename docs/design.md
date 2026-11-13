@@ -50,22 +50,25 @@ Hide the tab bar while the keyboard is open and during cooking view.
 - **Import review:** looks like the recipe page in edit mode, with uncertain fields marked; Save at the bottom; nothing is saved until you tap it.
 - **Profile / public cookbook page:** cover, name, handle, short bio, cookbooks as covers, then recipes. Reads well without an account.
 
-## Visual system (provisional)
+## Visual system
 
-**Owner decision, 13 Nov 2026: no orange.** "I do not like the colors of the app so far, it needs to be not orange." No orange,
-terracotta, tomato, amber or paprika as the accent, in covers, placeholder food art or dark mode. The warm paper neutrals
-below are provisional too, until the owner picks a direction from #4.
+**Owner decisions, 13 Nov 2026.** "I do not like the colors of the app so far, it needs to be not orange." Then, from the
+three mockups in #4 (PR #10): **"D Blueberry"**. Cool off-white with a deep blue/indigo accent. No orange, terracotta, tomato,
+amber or paprika anywhere (accent, covers, placeholder art, dark mode). Food photos bring the warmth; the interface stays cool.
 
 Single source of truth: `docs/design-tokens.json` → generated CSS. Edit the JSON, never a second palette.
 
 | Token | Light | Dark |
 |---|---|---|
-| Background | warm paper `#FBF8F3` | `#151311` |
-| Surface | `#FFFFFF` | `#1E1B18` |
-| Text | ink `#1F1B16` | `#F3EEE7` |
-| Secondary text | `#6B6258` | `#A89F94` |
-| Accent (primary action, active) | **to be replaced:** owner rejected orange; chosen from #4 | — |
-| Divider | `#E9E2D8` | `#2C2824` |
+| Background | `#F4F6FB` | `#111521` |
+| Surface | `#FFFFFF` | `#1B2030` |
+| Surface soft (search, chips, sheet rows) | `#E5E9F4` | `#252C42` |
+| Text | `#171B2A` | `#EEF1FB` |
+| Secondary text | `#5C6374` | `#AAB1C5` |
+| Accent (primary action, active) | blueberry `#35458F` | `#9EAFFF` |
+| Text on accent | `#FFFFFF` | `#111521` |
+| Accent soft (icon tiles, selection) | `#DFE4F8` | `#293665` |
+| Divider | `#D9DEEB` | `#323B57` |
 
 - **Type:** a warm serif for recipe and page titles (Fraunces or Source Serif 4, open licence, bundled); the native system sans for
   controls, body and numbers (tabular figures). Page titles 28–32 px, sections 17–20 px, body 15–16 px, secondary 13–14 px (never below 12).
