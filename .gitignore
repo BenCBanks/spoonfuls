@@ -1,0 +1,15 @@
+# Private to this server: never commit
+HOUSE.md
+*.env
+.env
+data/
+backups/
+uploads/
+# Local tooling
+__pycache__/
+node_modules/
+.pytest_cache/
+*.log
+/test-results/
+/playwright-report/
+mobile/ios/App/Pods/
