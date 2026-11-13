@@ -60,7 +60,7 @@ function renderAuth(mode) {
 
   const intro = document.createElement("p");
   intro.textContent = signup
-    ? "Start your private cookbook. An invite code is needed after the first account."
+    ? "Start your private cookbook. The first account needs the owner-provided bootstrap code."
     : "Sign in to get back to your cookbook.";
   section.append(intro);
 
@@ -70,6 +70,7 @@ function renderAuth(mode) {
   form.append(field("Email", "email", "email", "email"));
   form.append(field("Password", "password", "password", signup ? "new-password" : "current-password"));
   if (signup) form.append(field("Invite code (if you have one)", "text", "invite_code", "off", false));
+  if (signup) form.append(field("Bootstrap code (first account only)", "text", "bootstrap_code", "off", false));
 
   const formError = document.createElement("p");
   formError.className = "form-error";

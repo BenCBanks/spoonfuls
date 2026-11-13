@@ -24,6 +24,9 @@ def owner_connection():
 def clean_database(monkeypatch):
     db.apply_migrations()
     monkeypatch.setenv("SPOONFULS_COOKIE_SECURE", "0")
+    monkeypatch.setenv("SPOONFULS_BOOTSTRAP_CODE", "test-bootstrap-code")
+    with auth._login_lock:
+        auth._rate_events.clear()
     with owner_connection() as conn:
         conn.execute("DELETE FROM sessions")
         conn.execute("DELETE FROM invites")
@@ -39,6 +42,7 @@ def signup(client: TestClient, email: str, password: str, invite_code: str | Non
     body = {"email": email, "password": password}
     if invite_code:
         body["invite_code"] = invite_code
+    body["bootstrap_code"] = "test-bootstrap-code"
     return client.post("/api/auth/signup", json=body)
 
 
@@ -51,6 +55,8 @@ def test_first_account_is_admin_and_signs_in_with_secure_session_shape():
 
         signout = client.post("/api/auth/signout", headers=csrf_headers(client))
         assert signout.status_code == 204
+        with owner_connection() as conn:
+            assert conn.execute("SELECT count(*) FROM sessions").fetchone()[0] == 0
 
     response = TestClient(app).post(
         "/api/auth/signin",
@@ -93,6 +99,17 @@ def test_invites_are_single_use_and_expiry_is_enforced():
         assert response.status_code == 400
 
 
+def test_first_account_requires_the_owner_bootstrap_code(monkeypatch):
+    monkeypatch.delenv("SPOONFULS_BOOTSTRAP_CODE", raising=False)
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/auth/signup",
+            json={"email": "takeover@example.test", "password": "a-long-fictional-password"},
+        )
+    assert response.status_code == 400
+    assert response.json()["detail"]["field"] == "bootstrap_code"
+
+
 def test_wrong_password_is_generic_and_rate_limited():
     email = "rate-limit@example.test"
     with TestClient(app) as client:
@@ -110,6 +127,26 @@ def test_wrong_password_is_generic_and_rate_limited():
     assert "Retry-After" in limited.headers
 
 
+def test_signup_and_invite_attempts_are_rate_limited():
+    with TestClient(app) as client:
+        for _ in range(auth.SIGNUP_ATTEMPT_LIMIT):
+            response = client.post(
+                "/api/auth/signup",
+                json={"email": "signup-rate@example.test", "password": "too-short"},
+            )
+            assert response.status_code == 400
+        assert client.post(
+            "/api/auth/signup",
+            json={"email": "signup-rate@example.test", "password": "too-short"},
+        ).status_code == 429
+
+    with TestClient(app) as admin:
+        assert signup(admin, "invite-rate@example.test", "a-long-fictional-password").status_code == 201
+        for _ in range(auth.INVITE_ATTEMPT_LIMIT):
+            assert admin.post("/api/auth/invites", json={}, headers=csrf_headers(admin)).status_code == 201
+        assert admin.post("/api/auth/invites", json={}, headers=csrf_headers(admin)).status_code == 429
+
+
 def test_expired_session_is_rejected_and_writes_need_csrf():
     with TestClient(app) as client:
         assert signup(client, "session@example.test", "a-long-fictional-password").status_code == 201
@@ -118,3 +155,5 @@ def test_expired_session_is_rejected_and_writes_need_csrf():
         with owner_connection() as conn:
             conn.execute("UPDATE sessions SET expires_at = now() - interval '1 second'")
         assert client.get("/api/auth/me").status_code == 401
+        with owner_connection() as conn:
+            assert conn.execute("SELECT count(*) FROM sessions").fetchone()[0] == 0

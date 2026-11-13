@@ -62,6 +62,9 @@ def test_runtime_role_cannot_read_or_update_another_users_rows():
         assert conn.execute(
             "UPDATE sessions SET token_hash = 'changed' WHERE id = %s", (session_b,)
         ).rowcount == 0
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            conn.execute("UPDATE users SET is_admin = true WHERE id = %s", (user_a,))
+        conn.rollback()
 
 
 def test_email_index_is_case_insensitive():

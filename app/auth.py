@@ -27,7 +27,15 @@ CSRF_COOKIE = "spoonfuls_csrf"
 SESSION_MAX_AGE = 30 * 24 * 60 * 60
 LOGIN_WINDOW_SECONDS = 15 * 60
 LOGIN_FAILURE_LIMIT = 5
+SHORT_RATE_WINDOW_SECONDS = 60
+GLOBAL_ATTEMPT_LIMIT = 60
+SIGNUP_ATTEMPT_LIMIT = 5
+INVITE_ATTEMPT_LIMIT = 10
 PASSWORD_HASHER = PasswordHasher()
+DUMMY_PASSWORD_HASH = (
+    "$argon2id$v=19$m=65536,t=3,p=4$FWmkcCulh2OixrVDCVNQqA$"
+    "a2TvrvCymRfXedbR+PAS4ovBNOqaflfAHngPCL8P6I0"
+)
 COMMON_PASSWORDS = frozenset(
     {
         "1234567890",
@@ -40,7 +48,8 @@ COMMON_PASSWORDS = frozenset(
     }
 )
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
-_login_failures: dict[str, deque[float]] = defaultdict(deque)
+# In-memory limits are intentionally simple for the single-worker beta.
+_rate_events: dict[tuple[str, str], deque[float]] = defaultdict(deque)
 _login_lock = threading.Lock()
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -50,6 +59,7 @@ class Credentials(BaseModel):
     email: str
     password: str
     invite_code: str | None = None
+    bootstrap_code: str | None = None
 
 
 class InviteRequest(BaseModel):
@@ -120,28 +130,25 @@ def _clear_auth_cookies(response: Response) -> None:
     response.delete_cookie(CSRF_COOKIE, path="/")
 
 
-def _rate_key(request: Request, email: str) -> str:
-    return f"{request.client.host if request.client else 'unknown'}:{email}"
-
-
-def _check_login_rate(key: str) -> None:
+def _check_rate(bucket: str, key: str, limit: int, window: int) -> None:
     now = time.monotonic()
     with _login_lock:
-        attempts = _login_failures[key]
-        while attempts and now - attempts[0] >= LOGIN_WINDOW_SECONDS:
+        attempts = _rate_events[(bucket, key)]
+        while attempts and now - attempts[0] >= window:
             attempts.popleft()
-        if len(attempts) >= LOGIN_FAILURE_LIMIT:
+        if len(attempts) >= limit:
             raise HTTPException(
                 status_code=429,
-                detail="Too many sign-in attempts. Try again later.",
-                headers={"Retry-After": str(LOGIN_WINDOW_SECONDS)},
+                detail="Too many attempts. Try again later.",
+                headers={"Retry-After": str(window)},
             )
+        attempts.append(now)
 
 
 def _record_login_failure(key: str) -> None:
     now = time.monotonic()
     with _login_lock:
-        attempts = _login_failures[key]
+        attempts = _rate_events[("login-failure", key)]
         while attempts and now - attempts[0] >= LOGIN_WINDOW_SECONDS:
             attempts.popleft()
         attempts.append(now)
@@ -149,7 +156,7 @@ def _record_login_failure(key: str) -> None:
 
 def _clear_login_failures(key: str) -> None:
     with _login_lock:
-        _login_failures.pop(key, None)
+        _rate_events.pop(("login-failure", key), None)
 
 
 def _set_request_identity(conn, user_id: UUID, session_hash: str | None = None) -> None:
@@ -171,6 +178,8 @@ def current_user(request: Request) -> AuthContext:
     if not token:
         raise _unauthorized()
     token_hash = _hash_token(token)
+    with db.connection() as cleanup_conn:
+        cleanup_conn.execute("SELECT spoonfuls_prune_expired_sessions()")
     with db.connection() as conn:
         conn.execute("SELECT set_config('app.session_hash', %s, true)", (token_hash,))
         session = conn.execute(
@@ -230,12 +239,28 @@ def me(auth: AuthContext = Depends(current_user)):
 @router.post("/signup", status_code=201)
 def signup(payload: Credentials, response: Response):
     email = _normalise_email(payload.email)
+    _check_rate("global", "auth", GLOBAL_ATTEMPT_LIMIT, SHORT_RATE_WINDOW_SECONDS)
+    _check_rate("signup", email, SIGNUP_ATTEMPT_LIMIT, SHORT_RATE_WINDOW_SECONDS)
     _validate_password(payload.password)
     password_hash = PASSWORD_HASHER.hash(payload.password)
     try:
         with db.connection() as conn:
             conn.execute("SELECT pg_advisory_xact_lock(hashtextextended('spoonfuls-signup', 0))")
             has_users = conn.execute("SELECT spoonfuls_has_users()").fetchone()[0]
+            if not has_users:
+                bootstrap_code = os.environ.get("SPOONFULS_BOOTSTRAP_CODE")
+                if (
+                    not bootstrap_code
+                    or not payload.bootstrap_code
+                    or not hmac.compare_digest(payload.bootstrap_code, bootstrap_code)
+                ):
+                    raise HTTPException(
+                        status_code=400,
+                        detail={
+                            "field": "bootstrap_code",
+                            "message": "The first account needs the owner-provided bootstrap code.",
+                        },
+                    )
             if has_users:
                 if not payload.invite_code:
                     raise HTTPException(status_code=400, detail={"field": "invite_code", "message": "An invite code is required."})
@@ -258,20 +283,21 @@ def signup(payload: Credentials, response: Response):
 
 
 @router.post("/signin")
-def signin(payload: Credentials, request: Request, response: Response):
+def signin(payload: Credentials, response: Response):
     email = _normalise_email(payload.email)
-    key = _rate_key(request, email)
-    _check_login_rate(key)
+    key = email
+    _check_rate("global", "auth", GLOBAL_ATTEMPT_LIMIT, SHORT_RATE_WINDOW_SECONDS)
+    _check_rate("login", email, LOGIN_FAILURE_LIMIT, LOGIN_WINDOW_SECONDS)
     with db.connection() as conn:
         row = conn.execute(
             "SELECT user_id, password_hash FROM lookup_user_for_login(%s)", (email,)
         ).fetchone()
         valid = False
-        if row is not None:
-            try:
-                valid = PASSWORD_HASHER.verify(row[1], payload.password)
-            except (InvalidHashError, VerificationError, VerifyMismatchError):
-                valid = False
+        stored_hash = row[1] if row is not None else DUMMY_PASSWORD_HASH
+        try:
+            valid = PASSWORD_HASHER.verify(stored_hash, payload.password)
+        except (InvalidHashError, VerificationError, VerifyMismatchError):
+            valid = False
         if not valid:
             _record_login_failure(key)
             raise HTTPException(status_code=401, detail="Email or password is incorrect.")
@@ -305,6 +331,8 @@ def create_invite(
 ):
     if not auth.is_admin:
         raise HTTPException(status_code=403, detail="Only an admin can create invites.")
+    _check_rate("global", "auth", GLOBAL_ATTEMPT_LIMIT, SHORT_RATE_WINDOW_SECONDS)
+    _check_rate("invite", str(auth.user_id), INVITE_ATTEMPT_LIMIT, SHORT_RATE_WINDOW_SECONDS)
     code = secrets.token_urlsafe(18)
     expires_at = datetime.now(timezone.utc) + timedelta(days=payload.expires_in_days)
     with db.connection() as conn:

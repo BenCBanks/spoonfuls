@@ -123,12 +123,31 @@ MIGRATIONS: list[tuple[int, str, str]] = [
         END;
         $$;
 
+        CREATE OR REPLACE FUNCTION spoonfuls_prune_expired_sessions()
+        RETURNS VOID
+        LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
+        AS $$
+        BEGIN
+            DELETE FROM sessions WHERE expires_at <= now();
+        END;
+        $$;
+
+        ALTER DEFAULT PRIVILEGES IN SCHEMA public
+            REVOKE UPDATE ON TABLES FROM spoonfuls_app;
+        ALTER DEFAULT PRIVILEGES IN SCHEMA public
+            GRANT SELECT, INSERT, DELETE ON TABLES TO spoonfuls_app;
+
         REVOKE ALL ON FUNCTION lookup_user_for_login(TEXT) FROM PUBLIC;
         REVOKE ALL ON FUNCTION spoonfuls_has_users() FROM PUBLIC;
         REVOKE ALL ON FUNCTION spoonfuls_consume_invite(TEXT) FROM PUBLIC;
+        REVOKE ALL ON FUNCTION spoonfuls_prune_expired_sessions() FROM PUBLIC;
         GRANT EXECUTE ON FUNCTION lookup_user_for_login(TEXT) TO spoonfuls_app;
         GRANT EXECUTE ON FUNCTION spoonfuls_has_users() TO spoonfuls_app;
         GRANT EXECUTE ON FUNCTION spoonfuls_consume_invite(TEXT) TO spoonfuls_app;
+        GRANT EXECUTE ON FUNCTION spoonfuls_prune_expired_sessions() TO spoonfuls_app;
+
+        REVOKE UPDATE ON users FROM spoonfuls_app;
+        GRANT UPDATE (email, password_hash) ON users TO spoonfuls_app;
         """,
     ),
 ]
@@ -195,13 +214,18 @@ def _grant_app_role(conn: psycopg.Connection) -> None:
             cur.execute(sql.SQL("GRANT USAGE ON SCHEMA public TO {}").format(role))
             cur.execute(
                 sql.SQL(
-                    "GRANT SELECT, INSERT, UPDATE, DELETE ON users, sessions, invites TO {}"
+                    "GRANT SELECT, INSERT, DELETE ON users, sessions, invites TO {}"
                 )
                 .format(role)
             )
+            cur.execute(sql.SQL("GRANT UPDATE ON sessions, invites TO {}").format(role))
+            cur.execute(
+                sql.SQL("GRANT UPDATE (email, password_hash) ON users TO {}").format(role)
+            )
             cur.execute(
                 sql.SQL("GRANT EXECUTE ON FUNCTION lookup_user_for_login(TEXT), "
-                        "spoonfuls_has_users(), spoonfuls_consume_invite(TEXT) TO {}")
+                        "spoonfuls_has_users(), spoonfuls_consume_invite(TEXT), "
+                        "spoonfuls_prune_expired_sessions() TO {}")
                 .format(role)
             )
 

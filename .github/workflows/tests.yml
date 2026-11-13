@@ -50,3 +50,4 @@ jobs:
           DATABASE_URL: postgresql://spoonfuls_app:ci-app-password@localhost:5432/spoonfuls
           MIGRATION_DATABASE_URL: postgresql://spoonfuls:ci-password@localhost:5432/spoonfuls
           SPOONFULS_APP_PASSWORD: ci-app-password
+          SPOONFULS_BOOTSTRAP_CODE: ci-bootstrap-code
