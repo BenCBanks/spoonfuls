@@ -14,6 +14,7 @@ from playwright.sync_api import sync_playwright
 def server():
     env = os.environ.copy()
     env["SPOONFULS_AUTO_MIGRATE"] = "0"
+    env["SPOONFULS_ALLOW_PRIVILEGED_DATABASE_ROLE"] = "1"
     process = subprocess.Popen(
         [sys.executable, "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8765"],
         env=env,

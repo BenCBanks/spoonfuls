@@ -1,5 +1,7 @@
 from hashlib import sha256
 
+import pytest
+
 from fastapi.testclient import TestClient
 
 from app.main import STATIC_DIR, app, db
@@ -7,6 +9,7 @@ from app.main import STATIC_DIR, app, db
 
 def test_health_reports_database_state(monkeypatch):
     monkeypatch.setattr(db, "is_ready", lambda: True)
+    monkeypatch.setattr(db, "runtime_role_is_safe", lambda: True)
     with TestClient(app) as client:
         response = client.get("/api/health")
     assert response.status_code == 200
@@ -15,6 +18,7 @@ def test_health_reports_database_state(monkeypatch):
 
 def test_shell_and_security_headers(monkeypatch):
     monkeypatch.setattr(db, "is_ready", lambda: True)
+    monkeypatch.setattr(db, "runtime_role_is_safe", lambda: True)
     with TestClient(app) as client:
         response = client.get("/")
         static_response = client.get("/static/app.js")
@@ -41,3 +45,12 @@ def test_first_migration_has_private_users_and_sessions():
     assert "CREATE TABLE IF NOT EXISTS users" in sql
     assert "CREATE TABLE IF NOT EXISTS sessions" in sql
     assert "ENABLE ROW LEVEL SECURITY" in sql
+
+
+def test_privileged_runtime_role_is_rejected(monkeypatch):
+    monkeypatch.delenv("SPOONFULS_ALLOW_PRIVILEGED_DATABASE_ROLE", raising=False)
+    monkeypatch.setattr(db, "apply_migrations", lambda: None)
+    monkeypatch.setattr(db, "runtime_role_is_safe", lambda: False)
+    with pytest.raises(RuntimeError, match="refuses to start"):
+        with TestClient(app):
+            pass

@@ -47,6 +47,11 @@ MIGRATIONS: list[tuple[int, str, str]] = [
             USING (id = NULLIF(current_setting('app.user_id', true), '')::uuid);
         CREATE POLICY sessions_own_rows ON sessions
             USING (user_id = NULLIF(current_setting('app.user_id', true), '')::uuid);
+
+        ALTER DEFAULT PRIVILEGES IN SCHEMA public
+            GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO spoonfuls_app;
+        ALTER DEFAULT PRIVILEGES IN SCHEMA public
+            GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO spoonfuls_app;
         """,
     ),
 ]
@@ -140,5 +145,19 @@ def is_ready() -> bool:
         with connection() as conn:
             conn.execute("SELECT 1")
         return True
+    except (OSError, psycopg.Error):
+        return False
+
+
+def runtime_role_is_safe() -> bool:
+    """Return whether the runtime connection cannot bypass row-level security."""
+
+    try:
+        with connection() as conn:
+            row = conn.execute(
+                "SELECT NOT (rolsuper OR rolbypassrls) "
+                "FROM pg_roles WHERE rolname = current_user"
+            ).fetchone()
+        return bool(row and row[0])
     except (OSError, psycopg.Error):
         return False

@@ -27,6 +27,13 @@ async def lifespan(_: FastAPI):
             db.apply_migrations()
         except Exception:  # pragma: no cover - the health endpoint reports the failure
             logger.exception("database migrations are not available yet")
+    if (
+        os.environ.get("SPOONFULS_ALLOW_PRIVILEGED_DATABASE_ROLE") != "1"
+        and not db.runtime_role_is_safe()
+    ):
+        raise RuntimeError(
+            "Spoonfuls refuses to start with a superuser or RLS-bypass database role"
+        )
     yield
 
 
