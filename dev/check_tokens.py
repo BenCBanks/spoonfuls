@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import colorsys
+import re
 import sys
+from pathlib import Path
 
 from generate_tokens import load_tokens
 
@@ -24,9 +27,12 @@ def main() -> int:
     pairs = (
         ("text", "background"),
         ("text", "surface"),
+        ("text", "surface-soft"),
         ("secondary", "background"),
         ("secondary", "surface"),
+        ("secondary", "surface-soft"),
         ("accent", "background"),
+        ("accent", "surface"),
         ("text-on-accent", "accent"),
     )
     failures: list[str] = []
@@ -35,11 +41,28 @@ def main() -> int:
             ratio = contrast(colors[foreground], colors[background])
             if ratio < minimum:
                 failures.append(f"{theme}: {foreground} on {background} is {ratio:.2f}:1, needs {minimum:.1f}:1")
-    retired = {"#FBF8F3", "#1F1B16", "#B8432A", "#E0775C", "#E9E2D8", "#151311", "#1E1B18", "#2C2824"}
+            hue, saturation, _value = colorsys.rgb_to_hsv(
+                int(colors[foreground][1:3], 16) / 255,
+                int(colors[foreground][3:5], 16) / 255,
+                int(colors[foreground][5:7], 16) / 255,
+            )
+            if 10 <= hue * 360 <= 50 and saturation > 0.35:
+                failures.append(f"{theme}: orange-family hue is not allowed in {foreground}: {colors[foreground]}")
     for theme, colors in tokens["colors"].items():
         for name, value in colors.items():
-            if value.upper() in retired:
-                failures.append(f"{theme}: retired warm color remains in {name}: {value}")
+            hue, saturation, _value = colorsys.rgb_to_hsv(
+                int(value[1:3], 16) / 255,
+                int(value[3:5], 16) / 255,
+                int(value[5:7], 16) / 255,
+            )
+            if 10 <= hue * 360 <= 50 and saturation > 0.35:
+                failures.append(f"{theme}: orange-family hue is not allowed in {name}: {value}")
+    for stylesheet in (Path(__file__).resolve().parents[1] / "app" / "static").glob("*.css"):
+        if stylesheet.name == "tokens.css":
+            continue
+        raw = stylesheet.read_text(encoding="utf-8")
+        if re.search(r"#[0-9a-fA-F]{3,8}\b|\b(?:rgb|rgba|hsl|hsla)\s*\(", raw):
+            failures.append(f"{stylesheet}: raw color found; use generated token variables")
     if failures:
         print("\n".join(failures), file=sys.stderr)
         return 1
